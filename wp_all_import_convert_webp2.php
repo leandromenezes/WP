@@ -1,9 +1,37 @@
 <?php
+/*
+* Função que converte para o webp e aplica o nome do arquivo na imagem.
+*
+*/
+// ─── 1. Helper: converte qualquer idioma para slug ASCII ───────────────────
+function slugify_any_language(string $text): string {
+    if (empty($text)) return 'image';
 
-/**
- * Função central de conversão para WebP
- */
-function convert_image_to_webp(string $file_path, int $attachment_id): string {
+    // Tenta usar a extensão intl (melhor opção)
+    if (class_exists('Transliterator')) {
+        $transliterator = Transliterator::create('Any-Latin; Latin-ASCII; Lower()');
+        if ($transliterator) {
+            $text = $transliterator->transliterate($text);
+        }
+    }
+
+    // Fallback: remove qualquer coisa que não seja ASCII legível
+    $text = preg_replace('/[^\x20-\x7E]/u', '', $text);
+
+    // Aplica sanitização padrão do WordPress
+    $text = sanitize_title($text);
+
+    // Se ainda ficou vazio (texto 100% CJK sem transliteração disponível)
+    if (empty($text)) {
+        // Usa uma representação fonética simples via hash curto
+        $text = 'img-' . substr(md5(mb_convert_encoding($text ?? '', 'UTF-8')), 0, 8);
+    }
+
+    return $text;
+}
+
+// ─── 2. Função central de conversão para WebP ─────────────────────────────
+function convert_image_to_webp(string $file_path, int $attachment_id, string $new_name = ''): string {
     if (!file_exists($file_path)) return $file_path;
 
     $info = pathinfo($file_path);
@@ -11,7 +39,16 @@ function convert_image_to_webp(string $file_path, int $attachment_id): string {
 
     if (!in_array($ext, ['jpg', 'jpeg', 'png', 'jfif'])) return $file_path;
 
-    $webp_path = $info['dirname'] . '/' . $info['filename'] . '.webp';
+    // Se recebeu um nome novo, usa ele — senão mantém o nome original
+    $filename  = $new_name ? sanitize_title($new_name) : $info['filename'];
+    $webp_path = $info['dirname'] . '/' . $filename . '.webp';
+
+    // Evita colisão de nomes (ex: produto-nome.webp já existe de outro post)
+    $counter = 1;
+    while (file_exists($webp_path) && $webp_path !== $info['dirname'] . '/' . $info['filename'] . '.webp') {
+        $webp_path = $info['dirname'] . '/' . $filename . '-' . $counter . '.webp';
+        $counter++;
+    }
 
     if (!file_exists($webp_path)) {
         $image = null;
@@ -51,23 +88,22 @@ function convert_image_to_webp(string $file_path, int $attachment_id): string {
         if (!file_exists($webp_path)) return $file_path;
     }
 
-    // Remove o arquivo original
     @unlink($file_path);
 
     if ($attachment_id > 0) {
         $upload_dir = wp_upload_dir();
+        $relative   = ltrim(str_replace($upload_dir['basedir'], '', $webp_path), '/');
 
-        // Atualiza caminho do arquivo
-        $relative = ltrim(str_replace($upload_dir['basedir'], '', $webp_path), '/');
         update_post_meta($attachment_id, '_wp_attached_file', $relative);
 
-        // Atualiza mime type
+        // Atualiza também o título do attachment para o novo nome
         wp_update_post([
             'ID'             => $attachment_id,
             'post_mime_type' => 'image/webp',
+            'post_title'     => $filename,
+            'post_name'      => $filename,
         ]);
 
-        // Regenera metadados (thumbnails, dimensões, etc.)
         if (!function_exists('wp_generate_attachment_metadata')) {
             require_once ABSPATH . 'wp-admin/includes/image.php';
         }
@@ -78,76 +114,28 @@ function convert_image_to_webp(string $file_path, int $attachment_id): string {
     return $webp_path;
 }
 
-/**
- * Hook para imagem destaque importada pelo WP All Import
- */
+// ─── 3. Hook: imagem destaque + imagens no conteúdo ───────────────────────
 add_action('pmxi_saved_post', function(int $post_id) {
-    $thumbnail_id = get_post_thumbnail_id($post_id);
-    if (!$thumbnail_id) return;
+    $post     = get_post($post_id);
+    $slug     = $post->post_name ?: sanitize_title($post->post_title);
 
-    $file = get_attached_file($thumbnail_id);
-    if ($file) {
-        convert_image_to_webp($file, $thumbnail_id);
+    // Imagem destaque
+    $thumbnail_id = get_post_thumbnail_id($post_id);
+    if ($thumbnail_id) {
+        $file = get_attached_file($thumbnail_id);
+        if ($file) {
+            convert_image_to_webp($file, $thumbnail_id, $slug);
+        }
     }
 }, 10, 1);
 
-/**
- * Hook para imagens de galeria importadas pelo WP All Import
- */
+// ─── 4. Hook: imagens de galeria ──────────────────────────────────────────
 add_action('pmxi_gallery_image', function(int $attachment_id, string $image_url, int $post_id) {
-    $file = get_attached_file($attachment_id);
+    $post  = get_post($post_id);
+    $slug  = $post->post_name ?: sanitize_title($post->post_title);
+    $file  = get_attached_file($attachment_id);
+
     if ($file) {
-        convert_image_to_webp($file, $attachment_id);
+        convert_image_to_webp($file, $attachment_id, $slug);
     }
 }, 10, 3);
-
-/**
- * Converte imagens dentro do conteúdo HTML (<img src="...">)
- * e atualiza as URLs no banco de dados
- */
-add_action('pmxi_saved_post', function(int $post_id) {
-    $post = get_post($post_id);
-    if (!$post || empty($post->post_content)) return;
-
-    $content = $post->post_content;
-    $upload_dir = wp_upload_dir();
-    $base_url   = $upload_dir['baseurl'];
-    $base_dir   = $upload_dir['basedir'];
-
-    // Busca todas as URLs de imagem no conteúdo
-    preg_match_all('/<img[^>]+src=["\']([^"\']+)["\'][^>]*>/i', $content, $matches);
-
-    if (empty($matches[1])) return;
-
-    $updated = false;
-
-    foreach ($matches[1] as $img_url) {
-        // Apenas imagens do próprio servidor
-        if (strpos($img_url, $base_url) === false) continue;
-
-        $file_path = str_replace($base_url, $base_dir, $img_url);
-        $info = pathinfo($file_path);
-        $ext  = strtolower($info['extension'] ?? '');
-
-        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'jfif'])) continue;
-        if (!file_exists($file_path)) continue;
-
-        // Tenta encontrar o attachment_id pela URL
-        $attachment_id = attachment_url_to_postid($img_url);
-
-        $webp_path = convert_image_to_webp($file_path, (int) $attachment_id);
-
-        if ($webp_path !== $file_path) {
-            $webp_url = str_replace($base_dir, $base_url, $webp_path);
-            $content  = str_replace($img_url, $webp_url, $content);
-            $updated  = true;
-        }
-    }
-
-    if ($updated) {
-        wp_update_post([
-            'ID'           => $post_id,
-            'post_content' => $content,
-        ]);
-    }
-}, 20, 1); // priority 20 para rodar após o hook da featured image
