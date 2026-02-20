@@ -1,0 +1,66 @@
+<?php
+/*
+* 1. Cola o código no functions.php 
+* 2. Acessa no navegador logado como admin: https://seusite.com/?atualizar_alt=1
+* 3. Vai aparecer o relatório na tela com quantas foram atualizadas
+* 4. Remove o código do functions.php
+*/
+function meu_tema_atualizar_alt_title_em_massa() {
+
+    if ( ! isset( $_GET['atualizar_alt'] ) || $_GET['atualizar_alt'] !== '1' ) {
+        return;
+    }
+
+    if ( ! current_user_can( 'manage_options' ) ) {
+        return;
+    }
+
+    $args = array(
+        'post_type'      => 'attachment',
+        'post_mime_type' => 'image',
+        'post_status'    => 'inherit',
+        'posts_per_page' => -1,
+    );
+
+    $imagens = get_posts( $args );
+
+    if ( empty( $imagens ) ) {
+        echo 'Nenhuma imagem encontrada.';
+        return;
+    }
+
+    $atualizadas = 0;
+    $ignoradas   = 0;
+
+    foreach ( $imagens as $imagem ) {
+
+        $alt_atual = get_post_meta( $imagem->ID, '_wp_attachment_image_alt', true );
+
+        if ( ! empty( $alt_atual ) ) {
+            $ignoradas++;
+            continue;
+        }
+
+        $filename   = pathinfo( get_attached_file( $imagem->ID ), PATHINFO_FILENAME );
+        $alt_gerado = ucwords( str_replace( array( '-', '_' ), ' ', $filename ) );
+
+        update_post_meta( $imagem->ID, '_wp_attachment_image_alt', $alt_gerado );
+
+        if ( empty( $imagem->post_title ) || $imagem->post_title === $filename ) {
+            wp_update_post( array(
+                'ID'         => $imagem->ID,
+                'post_title' => $alt_gerado,
+            ) );
+        }
+
+        $atualizadas++;
+    }
+
+    echo "<strong>Concluído!</strong><br>";
+    echo "Imagens atualizadas: <strong>{$atualizadas}</strong><br>";
+    echo "Ignoradas (já tinham alt): <strong>{$ignoradas}</strong><br>";
+    echo "<br><strong>Agora remova a função do functions.php!</strong>";
+
+    die();
+}
+add_action( 'init', 'meu_tema_atualizar_alt_title_em_massa' );
