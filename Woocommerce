@@ -1,0 +1,190 @@
+/*
+ * ============================================================
+ * RESTRIÇÕES DE MENU E ACESSO — GERENTE DE LOJA
+ * ============================================================
+ * Descrição: Oculta itens do menu lateral e bloqueia o acesso
+ *            direto via URL para usuários com o papel
+ *            "Gerente de Loja" (shop_manager) do WooCommerce.
+ *            Administradores (manage_options) não são afetados.
+ * ============================================================
+ */
+add_action( 'admin_menu', 'restringir_menu_gerente_loja', 999 );
+function restringir_menu_gerente_loja() {
+
+    if ( ! current_user_can( 'manage_woocommerce' ) || current_user_can( 'manage_options' ) ) {
+        return;
+    }
+
+    // ── Páginas
+    remove_menu_page( 'edit.php?post_type=page' );
+
+    // ── Elementor
+    remove_menu_page( 'edit.php?post_type=elementor_library' );
+    remove_submenu_page( 'elementor', 'elementor-app' );
+
+    // ── WoodMart
+    remove_menu_page( 'edit.php?post_type=woodmart_layout' );
+    remove_menu_page( 'edit.php?post_type=cms_block' );
+    remove_menu_page( 'edit.php?post_type=woodmart_sidebar' );
+    remove_menu_page( 'edit.php?post_type=portfolio' );
+
+    // ── Aparência (menu inteiro)
+    remove_menu_page( 'themes.php' );
+
+    // ── Ferramentas (menu inteiro)
+    remove_menu_page( 'tools.php' );
+
+    // ── Pagamentos
+    remove_menu_page( 'admin.php?page=wc-settings&tab=checkout&from=PAYMENTS_MENU_ITEM' );
+
+    // ── Marketing / Cupons
+    remove_menu_page( 'woocommerce-marketing' );
+    remove_submenu_page( 'woocommerce', 'edit.php?post_type=shop_coupon' );
+    remove_menu_page( 'edit.php?post_type=shop_coupon' );
+
+    // ── Security
+    remove_menu_page( 'itsec-dashboard' );
+
+    // ── WP Sheet Editor
+    remove_menu_page( 'vg_sheet_editor_setup' );
+
+    // ── Submenus WooCommerce desnecessários
+    // REMOVIDO: remove_submenu_page( 'woocommerce', 'wc-admin' ) — era o pai do Analytics!
+    remove_submenu_page( 'woocommerce', 'superfrete-webhooks' );
+    remove_submenu_page( 'woocommerce', 'superfrete-settings' );
+    remove_submenu_page( 'woocommerce', 'superfrete-logs' );
+    remove_submenu_page( 'woocommerce', 'xts-checkout-fields-page' );
+    remove_submenu_page( 'woocommerce', 'wc-admin&path=/customers' );
+    remove_submenu_page( 'woocommerce', 'wc-reports' );
+    remove_submenu_page( 'woocommerce', 'wc-settings' );
+    remove_submenu_page( 'woocommerce', 'wc-status' );
+    remove_submenu_page( 'woocommerce', 'wc-addons' );
+    remove_submenu_page( 'woocommerce', 'edit.php?post_type=shop_order' );
+    remove_submenu_page( 'woocommerce', 'wc-admin&path=/extensions' );
+}
+
+
+add_action( 'admin_init', 'bloquear_acesso_gerente_loja' );
+function bloquear_acesso_gerente_loja() {
+
+    if ( ! current_user_can( 'manage_woocommerce' ) || current_user_can( 'manage_options' ) ) {
+        return;
+    }
+
+    $page      = isset( $_GET['page'] )      ? sanitize_text_field( $_GET['page'] )      : '';
+    $tab       = isset( $_GET['tab'] )       ? sanitize_text_field( $_GET['tab'] )       : '';
+    $path      = isset( $_GET['path'] )      ? sanitize_text_field( $_GET['path'] )      : '';
+    $post_type = isset( $_GET['post_type'] ) ? sanitize_text_field( $_GET['post_type'] ) : '';
+    $taxonomy  = isset( $_GET['taxonomy'] )  ? sanitize_text_field( $_GET['taxonomy'] )  : '';
+    $pagenow   = isset( $GLOBALS['pagenow'] ) ? $GLOBALS['pagenow'] : '';
+
+    $bloquear = false;
+
+    // Post types bloqueados
+    $post_types_bloqueados = [
+        'page', 'elementor_library', 'woodmart_layout',
+        'cms_block', 'woodmart_sidebar', 'portfolio', 'shop_coupon',
+    ];
+    if ( in_array( $post_type, $post_types_bloqueados, true ) ) {
+        $bloquear = true;
+    }
+
+    // Taxonomias bloqueadas
+    $taxonomias_bloqueadas = [
+        'elementor_library_category', 'cms_block_cat', 'project-cat',
+    ];
+    if ( in_array( $taxonomy, $taxonomias_bloqueadas, true ) ) {
+        $bloquear = true;
+    }
+
+    // Pages bloqueadas
+    $pages_bloqueadas = [
+        'elementor-app',
+        'itsec-dashboard', 'itsec-site-scan', 'itsec-firewall',
+        'itsec-vulnerabilities', 'itsec-user-security', 'itsec',
+        'itsec-tools', 'itsec-logs', 'itsec-go-pro',
+        'vg_sheet_editor_setup',
+        'woocommerce-marketing',
+    ];
+    if ( in_array( $page, $pages_bloqueadas, true ) ) {
+        $bloquear = true;
+    }
+
+    // Pagamentos
+    if ( $page === 'wc-settings' && $tab === 'checkout' ) {
+        $bloquear = true;
+    }
+
+    // Marketing — SOMENTE /marketing bloqueado, /analytics fica livre
+    if ( $page === 'wc-admin' && strpos( $path, '/marketing' ) !== false ) {
+        $bloquear = true;
+    }
+
+    // Arquivos diretos bloqueados
+    $arquivos_bloqueados = [
+        'themes.php', 'site-editor.php', 'customize.php',
+        'widgets.php', 'nav-menus.php',
+        'tools.php', 'import.php', 'export.php',
+    ];
+    if ( in_array( $pagenow, $arquivos_bloqueados, true ) ) {
+        $bloquear = true;
+    }
+
+    if ( $bloquear ) {
+        wp_safe_redirect( admin_url() );
+        exit;
+    }
+}
+
+// ── Remove o "Início" do WooCommerce visualmente (sem bloquear wc-admin base)
+add_action( 'admin_head', function() {
+    if ( ! current_user_can('manage_woocommerce') || current_user_can('manage_options') ) return;
+    ?>
+    <style>
+        /* Esconde o menu WooCommerce inteiro */
+        #toplevel_page_woocommerce {
+            display: none !important;
+        }
+    </style>
+    <?php
+});
+
+/*
+ * Descrição: Adiciona atalhos diretos no menu lateral do Admin
+ *            para o Gerente de Loja, evitando que ele precise
+ *            navegar pelos submenus do WooCommerce.
+ * No caso, habilitei somente para Pedidos
+*/
+
+add_action( 'admin_menu', 'menu_rapido_gerente_loja', 998 );
+function menu_rapido_gerente_loja() {
+
+    if ( ! current_user_can( 'manage_woocommerce' ) || current_user_can( 'manage_options' ) ) {
+        return;
+    }
+
+    // ── Apenas Pedidos
+    add_menu_page(
+        'Pedidos',
+        'Pedidos',
+        'manage_woocommerce',
+        'menu-rapido-pedidos',
+        'menu_rapido_redirect_pedidos',
+        'dashicons-clipboard',
+        53
+    );
+}
+
+function menu_rapido_redirect_pedidos() {
+    wp_safe_redirect( admin_url( 'edit.php?post_type=shop_order' ) );
+    exit;
+}
+
+// ── Corrigir o link gerado no menu lateral
+add_filter( 'admin_url', 'corrigir_url_menu_rapido', 10, 2 );
+function corrigir_url_menu_rapido( $url, $path ) {
+    if ( strpos( $path, 'menu-rapido-pedidos' ) !== false ) {
+        return admin_url( 'edit.php?post_type=shop_order' );
+    }
+    return $url;
+}
