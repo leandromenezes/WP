@@ -1,0 +1,88 @@
+/*
+*
+* Função construida para injectar um banner antes do H2 que é considerado o do "meio", se temos 6 h2 na paginas ali pela 3-4 h2 iremos ter o banner injetado.
+* Essa versão injetada somente nas categorias escolhidas
+*
+*/
+
+add_action( 'wp_footer', 'prefix_inject_banner_via_footer', 1 );
+
+function prefix_inject_banner_via_footer() {
+
+    $queried_object = get_queried_object();
+
+    if ( ! $queried_object || ! isset( $queried_object->post_type ) ) {
+        return;
+    }
+
+    if ( $queried_object->post_type !== 'post' ) {
+        return;
+    }
+
+    $banners_by_category = [
+        384 => [//ID da categoria
+            'image_url' => '/wp-content/uploads/2026/03/post-banner-image-1.webp',
+            'link'      => 'url destino,
+            'category'  => 'Compliance', //alt da imagem, que esta sendo Feito Banner + Category
+        ],
+        385 => [
+            'image_url' => '/wp-content/uploads/2026/03/post-banner-image-2.webp',
+            'link'      => 'url destino,
+            'category'  => 'Economia',
+        ],
+        386 => [
+            'image_url' => '/wp-content/uploads/2026/03/post-banner-image-3.webp',
+            'link'      => 'url destino,
+            'category'  => 'Importação',
+        ],
+        49 => [
+            'image_url' => '/wp-content/uploads/2026/03/post-banner-image-4.webp',
+            'link'      => 'url destino,
+            'category'  => 'Exportação',
+        ],
+    ];
+
+    $post_categories = get_the_category( $queried_object->ID );
+
+    if ( empty( $post_categories ) ) {
+        return;
+    }
+
+    $matched_banner = null;
+
+    foreach ( $post_categories as $category ) {
+        if ( isset( $banners_by_category[ (int) $category->term_id ] ) ) {
+            $matched_banner = $banners_by_category[ (int) $category->term_id ];
+            break;
+        }
+    }
+
+    if ( is_null( $matched_banner ) ) {
+        return;
+    }
+    
+    $alt = 'Banner - ' . $matched_banner['category'];
+
+    $ad_code = '<div class="banner"><a href="' . esc_url( $matched_banner['link'] ) . '" target="_blank" rel="noopener noreferrer"><img src="' . esc_url( $matched_banner['image_url'] ) . '" alt="' . esc_attr( $alt ) . '" style="max-width:100%;height:auto;margin-block-end: 1.2em;"></a></div>';
+
+    echo '<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        var blogContent = document.getElementById("blog_content");
+        if (!blogContent) return;
+
+        var h2s = blogContent.querySelectorAll("h2");
+        console.log("Total de H2s encontrados: " + h2s.length);
+
+        if (h2s.length === 0) return;
+
+        var centralIndex = Math.ceil(h2s.length / 2) - 1;
+        var targetH2 = h2s[centralIndex];
+
+        var banner = document.createElement("div");
+        banner.innerHTML = ' . json_encode( $ad_code ) . ';
+
+        // Insere ANTES do H2 central
+        targetH2.parentNode.insertBefore(banner.firstChild, targetH2);
+    });
+    </script>';
+}
